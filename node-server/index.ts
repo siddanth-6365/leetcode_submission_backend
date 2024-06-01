@@ -2,11 +2,11 @@ import express, { Request, Response } from "express";
 import { createClient } from "redis";
 import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage } from "http";
-import cors from "cors"
+import cors from "cors";
 
 const app = express();
 app.use(express.json());
-app.use(cors())
+app.use(cors());
 
 const client = createClient();
 client.on("error", (error: Error) => {
@@ -17,7 +17,6 @@ const httpServer = app.listen(8080, () => {
   console.log("HTTP server started on http://localhost:8080");
 });
 
-// WebSocket server
 const wss = new WebSocketServer({ noServer: true });
 
 interface ConnectedUsers {
@@ -26,8 +25,8 @@ interface ConnectedUsers {
 
 const connectedUsers: ConnectedUsers = {};
 
-// Handle WebSocket connections
 wss.on("connection", (ws: WebSocket, userId: string) => {
+  console.log("inside connection");
   connectedUsers[userId] = ws;
   ws.send(JSON.stringify({ message: "Connected" }));
 
@@ -36,14 +35,15 @@ wss.on("connection", (ws: WebSocket, userId: string) => {
   });
 });
 
-// Handle Redis pub/sub messages
 async function handleRedisMessages() {
+  console.log("inside handleRedisMessages");
   const subscriber = client.duplicate();
   await subscriber.connect();
   await subscriber.subscribe("submission_responses", (message: string) => {
     const data = JSON.parse(message);
     const userId: string = data.userId;
     const response = data.response;
+    response.demo = "demo";
 
     if (connectedUsers[userId]) {
       connectedUsers[userId].send(JSON.stringify({ response }));
@@ -51,11 +51,13 @@ async function handleRedisMessages() {
   });
 }
 
-handleRedisMessages().catch(console.error);
+handleRedisMessages();
 
-// Upgrade HTTP to WebSocket
+// Upgrade HTTP to WebSocket, client request on ws://localhost:8080?userId=
 httpServer.on("upgrade", (request: IncomingMessage, socket: any, head: any) => {
+  console.log("inside upgrade request");
   const urlParams = new URLSearchParams(request.url?.split("?")[1]);
+  console.log("urlParams :", urlParams);
   const userId = urlParams.get("userId");
 
   if (userId) {
@@ -70,15 +72,13 @@ httpServer.on("upgrade", (request: IncomingMessage, socket: any, head: any) => {
 app.post("/submit", async (req: Request, res: Response) => {
   try {
     const { problemId, userId, code } = req.body;
-
-    // Push the submission to the Redis queue
+    console.log("Received submission for user", userId);
     await client.rPush(
       "submissions",
       JSON.stringify({ problemId, userId, code })
     );
 
-    // Create WebSocket connection for the user
-    const wsUrl = `ws://localhost:8080/?userId=${userId}`;
+    const wsUrl = `ws://localhost:8080?userId=${userId}`;
     res.json({ status: "success", wsUrl });
   } catch (error) {
     console.error("Error while submitting code:", error);
@@ -86,7 +86,6 @@ app.post("/submit", async (req: Request, res: Response) => {
   }
 });
 
-// Connect to Redis and start the server
 async function startServer() {
   try {
     await client.connect();
